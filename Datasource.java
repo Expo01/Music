@@ -51,12 +51,14 @@ public class Datasource {
     // Advantage of not hard coding any names because it would be horrendous to change
 
     public static final String QUERY_ARTIST_FOR_SONG_START =
-            "SELECT " + TABLE_ARTISTS + "." + COLUMN_ARTIST_NAME + ", " + TABLE_ALBUMS + "." + COLUMN_ALBUM_NAME +
-                    ", " + TABLE_SONGS + "." + COLUMN_SONG_TRACK + " FROM " + TABLE_SONGS + " INNER JOIN " +
-                    TABLE_ALBUMS + " ON " + TABLE_SONGS + "." + COLUMN_SONG_ALBUM + " = " + TABLE_ALBUMS + "." +
-                    COLUMN_ALBUM_ID + " INNER JOIN " + TABLE_ARTISTS + " ON " + TABLE_ALBUMS + "." + COLUMN_ALBUM_ARTIST
-                    + " = " + TABLE_ARTISTS + "." + COLUMN_ARTIST_ID + " WHERE " + TABLE_SONGS + "." + COLUMN_SONG_TITLE
-                    + " = \"";
+            "SELECT " + TABLE_ARTISTS + "." + COLUMN_ARTIST_NAME + ", " +
+                    TABLE_ALBUMS + "." + COLUMN_ALBUM_NAME + ", " +
+                    TABLE_SONGS + "." + COLUMN_SONG_TRACK + " FROM " + TABLE_SONGS +
+                    " INNER JOIN " + TABLE_ALBUMS + " ON " +
+                    TABLE_SONGS + "." + COLUMN_SONG_ALBUM + " = " + TABLE_ALBUMS + "." + COLUMN_ALBUM_ID +
+                    " INNER JOIN " + TABLE_ARTISTS + " ON " +
+                    TABLE_ALBUMS + "." + COLUMN_ALBUM_ARTIST + " = " + TABLE_ARTISTS + "." + COLUMN_ARTIST_ID +
+                    " WHERE " + TABLE_SONGS + "." + COLUMN_SONG_TITLE + " = \"";
 
     public static final String QUERY_ARTIST_FOR_SONG_SORT =
             " ORDER BY " + TABLE_ARTISTS + "." + COLUMN_ARTIST_NAME + ", " + TABLE_ALBUMS + "." + COLUMN_ALBUM_NAME
@@ -86,16 +88,43 @@ public class Datasource {
             COLUMN_SONG_ALBUM + ", " + COLUMN_SONG_TRACK + " FROM " + TABLE_ARTIST_SONG_VIEW +
             " WHERE " + COLUMN_SONG_TITLE + " = ?";
 
-   private PreparedStatement querySongInfoView;
+    public static final String INSERT_ARTIST = "INSERT INTO " + TABLE_ARTISTS +
+            '(' + COLUMN_ARTIST_NAME + ") VALUES(?)";
+    public static final String INSERT_ALBUMS = "INSERT INTO " + TABLE_ALBUMS +
+            '(' + COLUMN_ALBUM_NAME + ", " + COLUMN_ALBUM_ARTIST + ") VALUES(?, ?)";
+
+    public static final String INSERT_SONGS = "INSERT INTO " + TABLE_SONGS +
+            '(' + COLUMN_SONG_TRACK + ", " + COLUMN_SONG_TITLE + ", " + COLUMN_SONG_ALBUM +
+            ") VALUES(?, ?, ?)";
+
+    public static final String QUERY_ARTIST = "SELECT " + COLUMN_ARTIST_ID + " FROM " +
+            TABLE_ARTISTS + " WHERE " + COLUMN_ARTIST_NAME + " = ?";
+
+    public static final String QUERY_ALBUM = "SELECT " + COLUMN_ALBUM_ID + " FROM " +
+            TABLE_ALBUMS + " WHERE " + COLUMN_ALBUM_NAME + " = ?";
 
     private Connection conn;
 
+    private PreparedStatement querySongInfoView;
+
+    private PreparedStatement insertIntoArtists;
+    private PreparedStatement insertIntoAlbums;
+    private PreparedStatement insertIntoSongs;
+    private PreparedStatement queryArtist;
+    private PreparedStatement queryAlbum;
 
     // --------------------- METHODS ----------------------------
 
     public boolean open() {
         try {
             conn = DriverManager.getConnection(CONNECTION_STRING);
+            querySongInfoView = conn.prepareStatement(QUERY_VIEW_SONG_INFO_PREP);
+            insertIntoArtists = conn.prepareStatement(INSERT_ARTIST, Statement.RETURN_GENERATED_KEYS);
+            insertIntoAlbums = conn.prepareStatement(INSERT_ALBUMS, Statement.RETURN_GENERATED_KEYS);
+            insertIntoSongs = conn.prepareStatement(INSERT_SONGS);
+            queryArtist = conn.prepareStatement(QUERY_ARTIST);
+            queryAlbum = conn.prepareStatement(QUERY_ALBUM);
+
             return true;
         } catch(SQLException e) {
             System.out.println("Couldn't connect to database: " + e.getMessage());
@@ -105,6 +134,30 @@ public class Datasource {
 
     public void close() {
         try {
+            if(querySongInfoView != null){
+                querySongInfoView.close();
+            }
+
+            if(insertIntoArtists != null) {
+                insertIntoArtists.close();
+            }
+
+            if(insertIntoAlbums != null) {
+                insertIntoAlbums.close();
+            }
+
+            if(insertIntoSongs !=  null) {
+                insertIntoSongs.close();
+            }
+
+            if(queryArtist != null) {
+                queryArtist.close();
+            }
+
+            if(queryAlbum != null) {
+                queryAlbum.close();
+            }
+
             if(conn != null) {
                 conn.close();
             }
@@ -328,6 +381,8 @@ public class Datasource {
             return null;
         }
     } // uses regular Statement class
+    // susceptible to SQL injection attacks such as inputting: "Go Your Own Way" or 1=1 or "
+
 
     public List<SongArtist> querySongInfoView(String title) {
 
@@ -345,6 +400,7 @@ public class Datasource {
                 songArtist.setAlbumName(results.getString(2));
                 songArtist.setTrack(results.getInt(3));
                 songArtists.add(songArtist);
+
             }
 
             return songArtists;
@@ -353,7 +409,135 @@ public class Datasource {
             System.out.println("Query failed: " + e.getMessage());
             return null;
         }
+    } // queries view and returns arist name, album and track #
+    // associated with entered song from Scanner object
+    // Is NOT susceptible to SQL injection
+    // attack due to PreparedStatement. When using PreparedStatement, values are treated as literal values
+    // so none of the values can be treated as SQL.
+    // content sent as input using stringbuilder concatination will ultimately be....
+    // SELECT name, album, track FROM artist_list WHERE title = "Go your Own Way" or 1=1 or ""
+    // vs prpared statment
+    // content sent as input will ultimately be....
+    // SELECT name, album, track FROM artist_list WHERE title = "Go your Own Way or 1=1 or ""
+    // note that just a single " is now gone after Way which now means it will search for the whole
+    // title of "Go your Own Way or 1=1 or ""
+    // which will not be found in the DB
+
+
+
+    // transaction: here is the concept. Suppose an action requires multiple SQL statements to complete the function such
+    // as having a bank transfer where $ is subtracted from one account and added to another through 2 separate SQL functions
+    // if the subtraction command succeeds but the addition to second account fails, bank 1 loses money and bank 2 doesn't
+    // get it and the $ is now effectively missing. The goal here is that we want all SQL statements involved in a single
+    // larger function to execute in an all or nothing manner. We want to withhold all changes unless all SQL commands run properly
+    // A transaction is effectively a sequence of SQL statements treated as a single unit. if anything in the sequence fails,
+    // changes can be rolled back or just not saved (committed).
+    // Only have to use transactions when editing the database, not for querying.
+    // SQLite uses transactions by default and auto-commits by default such with the update, delete and insert statements
+    // uses, SQLite was automatically creating a transaction, running the statement, then committing
+    // JDBC Connection class also auto-commits by default. When we turned off auto-commit, SQLite stopped autocommiting but
+    // but transactions still created
+
+    // Should adhere to Database ACID concepts
+
+    // MANUAL CREATION OF TRANSACTION
+    // - commands: BEGIN TRANSACTION, END TRANSACTION (interchangeable with COMMIT), ROLLBACK
+    // we don't code transcation SQL statement and use statement objects to execute them, instead we use methods of the
+    // Connection class to execute transction realted commands
+    // turn off auto-commits via Connection.setAutoCommit(false) --> perofrm SQL operations that form the transaction -->
+    // call Connection.commit()
+
+
+    // to simplify, we won't be updating the view and we won't be checking if content already exists in the tables/view
+
+    private int insertArtist(String name) throws SQLException {
+
+        queryArtist.setString(1, name);
+        ResultSet results = queryArtist.executeQuery(); // query to see if artist exists
+        if(results.next()) {
+            return results.getInt(1); // if artists already exists, return it
+        } else {
+            // Insert the artist
+            insertIntoArtists.setString(1, name); // pass name of artist to be inserted
+            int affectedRows = insertIntoArtists.executeUpdate(); // should udate one row and return # of rows updated
+
+            if(affectedRows != 1) { // if one row isn't updated, then its a problem
+                throw new SQLException("Couldn't insert artist!");
+            }
+
+            ResultSet generatedKeys = insertIntoArtists.getGeneratedKeys();
+            if(generatedKeys.next()) {
+                return generatedKeys.getInt(1);
+            } else {
+                throw new SQLException("Couldn't get _id for artist");
+            }
+        }
     }
 
+    private int insertAlbum(String name, int artistId) throws SQLException {
+
+        queryAlbum.setString(1, name);
+        ResultSet results = queryAlbum.executeQuery();
+        if(results.next()) {
+            return results.getInt(1);
+        } else {
+            // Insert the album
+            insertIntoAlbums.setString(1, name);
+            insertIntoAlbums.setInt(2, artistId);
+            int affectedRows = insertIntoAlbums.executeUpdate(); // 2 fields updated, but still only 1 row
+
+            if(affectedRows != 1) {
+                throw new SQLException("Couldn't insert album!");
+            }
+
+            ResultSet generatedKeys = insertIntoAlbums.getGeneratedKeys();
+            if(generatedKeys.next()) {
+                return generatedKeys.getInt(1);
+            } else {
+                throw new SQLException("Couldn't get _id for album");
+            }
+        }
+    }
+
+    public void insertSong(String title, String artist, String album, int track) {
+// no query exists in this method to check if song already exists
+        try {
+            conn.setAutoCommit(false); // signals start of manual transaction
+
+            int artistId = insertArtist(artist);
+            int albumId = insertAlbum(album, artistId);
+            insertIntoSongs.setInt(1, track);
+            insertIntoSongs.setString(2, title);
+            insertIntoSongs.setInt(3, albumId);
+            int affectedRows = insertIntoSongs.executeUpdate();
+            if(affectedRows == 1) {
+                conn.commit(); // commit ends a transaction
+            } else {
+                throw new SQLException("The song insert failed");
+            }
+
+        } catch(Exception e) { // Exception not SQLexception since we can get stuff like array out of bounds exception
+            // if trying to input a song at an OOB index, it will update the albums and artist table but not the song
+            // table which goes against what we were trying to do with creating a transaction, but since its not a SQL
+            // exception, the rollback doesn't occur since no error thrown and then jumps to finally block and commits
+            // the artist and album table changes when autoCommit reset
+            System.out.println("Insert song exception: " + e.getMessage());
+            try {
+                System.out.println("Performing rollback");
+                conn.rollback();
+            } catch(SQLException e2) {
+                System.out.println("Oh boy! Things are really bad! " + e2.getMessage());
+            }
+        } finally {
+            try {
+                System.out.println("Resetting default commit behavior");
+                conn.setAutoCommit(true);
+            } catch(SQLException e) {
+                System.out.println("Couldn't reset auto-commit! " + e.getMessage());
+            }
+
+        }
+    }
 }
+
 
